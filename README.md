@@ -30,7 +30,7 @@ Behavior
 
 Safety
 - Use `--dry-run` to preview commands before executing.
-- Use `--no-log` to disable logging.
+- Logs are written to `archive.log` in the destination folder (disabled for `--dry-run`).
 
 Notes
 - Requires `find` and `tar` available in PATH. On some systems (BSD tar) the `--null -T -` options may behave differently; test with `--dry-run` first.

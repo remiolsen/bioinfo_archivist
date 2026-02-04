@@ -54,7 +54,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("output_folder", nargs="?", help="Destination folder for archives (overrides env)")
     p.add_argument("--months", type=int, default=6, help="Age threshold in months (default: 6)")
     p.add_argument("--dry-run", action="store_true", help="Show actions without executing them")
-    p.add_argument("--no-log", action="store_true", help="Do not write archive.log entries")
     p.add_argument("--use-lock", action="store_true", help="Use advisory lock when appending to log")
     p.add_argument("--log-rotate-size", type=int, default=0, help="Rotate log if larger than bytes (0=disabled)")
     p.add_argument("--keep", type=int, default=5, help="Number of rotated logs to keep")
@@ -280,14 +279,15 @@ def main() -> int:
         print(f" -> archive: {archive_path} ({human_readable(arc_size)})")
         archive_sizes += arc_size
 
-        if not args.dry_run:
-            try:
-                shutil.rmtree(path)
-                print(f"Deleted original folder: {path}")
-            except Exception as e:
-                print(f"Warning: could not delete {path}: {e}")
+        # Instead of automatically deleting folders, print a shell command
+        # the user can run manually. Preserve dry-run messaging.
+        rm_cmd = f"rm -rf {shlex.quote(path)}"
+        if args.dry_run:
+            print(f"DRY RUN: would run: {rm_cmd}")
+        else:
+            print(rm_cmd)
 
-        if not args.no_log:
+        if not args.dry_run:
             try:
                 write_log_entry(output_folder, path, orig_size, args.use_lock, args.log_rotate_size, args.keep)
             except Exception as e:
