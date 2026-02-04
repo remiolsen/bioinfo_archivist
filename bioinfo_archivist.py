@@ -164,7 +164,7 @@ def archive_folder(
         "cd "
         + shlex.quote(source_root)
         + " && "
-        + shlex.quote(find_prog)
+        + shlex.quote(find_prog) + " "
         + shlex.quote(rel_project)
         + " -regextype posix-extended -type f -iregex '"
         + EXT_REGEX
