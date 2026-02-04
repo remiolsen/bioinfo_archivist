@@ -322,6 +322,7 @@ def main() -> int:
 
     archived_total = 0
     archive_sizes = 0
+    paths_to_remove: List[str] = []
     for path, orig_size in folders:
         print(f"Archiving: {path} ...")
         try:
@@ -340,13 +341,9 @@ def main() -> int:
         print(f" -> archive: {archive_path} ({human_readable(arc_size)})")
         archive_sizes += arc_size
 
-        # Instead of automatically deleting folders, print a shell command
-        # the user can run manually. Preserve dry-run messaging.
-        rm_cmd = f"rm -rf {shlex.quote(path)}"
-        if args.dry_run:
-            print(f"DRY RUN: would run: {rm_cmd}")
-        else:
-            print(rm_cmd)
+        # Instead of automatically deleting folders, collect paths and print
+        # a single cut/paste-friendly rm command block at the end.
+        paths_to_remove.append(path)
 
         if not args.dry_run:
             try:
@@ -355,6 +352,14 @@ def main() -> int:
                 print(f"Warning: failed to write log entry: {e}")
 
         archived_total += orig_size
+
+    if paths_to_remove:
+        rm_chain = " && ".join(f"rm -rf {shlex.quote(p)}" for p in paths_to_remove)
+        print("\nManual deletion (copy/paste):")
+        if args.dry_run:
+            print(f"DRY RUN: would run: {rm_chain}")
+        else:
+            print(rm_chain)
 
     reclaimed = archived_total - archive_sizes
     print("\nSummary:")
