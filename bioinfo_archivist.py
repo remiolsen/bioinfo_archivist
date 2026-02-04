@@ -20,7 +20,7 @@ folder and original folders are not deleted automatically (the script prints
 to `archive.log` in the destination folder.
 
 Notes:
-  - Requires standard Unix tools `find` and `tar` available in PATH.
+    - Requires GNU findutils (`find` on Linux, or `gfind` from Homebrew findutils on macOS) and `tar` available in PATH.
   - Designed to be zero-install (standard library only).
 """
 
@@ -41,10 +41,31 @@ import tempfile
 from typing import List, Tuple
 
 
+# Regex for GNU find's `-iregex` when used with `-regextype posix-extended`.
 EXT_REGEX = (
     r".*\.(err|out|stdOut|stdErr|pdf|yaml|yml|xml|json|md|settings|txt|log|html|tsv|csv|"
     r"slurm|sbatch|sh|py|R|conf|config|ini)$"
 )
+
+
+def require_gnu_find() -> str:
+    """Return a GNU findutils binary path.
+
+    On macOS, Homebrew findutils installs GNU find as `gfind`.
+    """
+    for prog in ("gfind", "find"):
+        path = shutil.which(prog)
+        if not path:
+            continue
+        try:
+            res = subprocess.run([path, "--version"], check=False, capture_output=True, text=True)
+        except Exception:
+            continue
+        if res.returncode == 0 and "GNU findutils" in (res.stdout or ""):
+            return path
+    raise RuntimeError(
+        "GNU findutils is required. On macOS: `brew install findutils` and ensure `gfind` is in PATH."
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +135,7 @@ def archive_folder(
     dry_run: bool = False,
     verbose: bool = False,
     source_dir: str | None = None,
+    find_bin: str | None = None,
 ) -> Tuple[str, int]:
     trim_path = folder.rstrip("/\\")
     base = os.path.basename(trim_path)
@@ -137,12 +159,14 @@ def archive_folder(
 
     # Run from the source root so file list paths match what tar expects,
     # and keep the top-level project folder name inside the archive.
+    find_prog = find_bin or "find"
     find_cmd = (
         "cd "
         + shlex.quote(source_root)
-        + " && find "
+        + " && "
+        + shlex.quote(find_prog)
         + shlex.quote(rel_project)
-        + " -type f -iregex '"
+        + " -regextype posix-extended -type f -iregex '"
         + EXT_REGEX
         + "' -size -10M -print0 | tar -czf "
         + shlex.quote(tmp_path)
@@ -267,6 +291,12 @@ def main() -> int:
     input_folder = args.input_folder
     output_folder = args.output_folder or os.environ.get("BIOINFO_ARCHIVIST_OUTPUT") or os.path.join(os.getcwd(), "archives")
 
+    try:
+        find_bin = require_gnu_find()
+    except Exception as e:
+        print(f"Error: {e}")
+        return 2
+
     if not os.path.isdir(input_folder):
         print(f"Error: input folder does not exist or is not a directory: {input_folder}")
         return 2
@@ -301,6 +331,7 @@ def main() -> int:
                 dry_run=args.dry_run,
                 verbose=args.verbose,
                 source_dir=input_folder,
+                find_bin=find_bin,
             )
         except Exception as e:
             print(f"Failed to archive {path}: {e}")
