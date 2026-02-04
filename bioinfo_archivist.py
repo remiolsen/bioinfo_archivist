@@ -15,7 +15,8 @@ This script scans immediate subdirectories of <input_folder> for modification
 time older than the threshold, shows them to the user, and on confirmation
 archives selected files using a `find | tar` pipeline similar to the
 provided `compress_logs` function. Archives are moved to the destination
-folder and original folders are deleted. Each successful archive is logged
+folder and original folders are not deleted automatically (the script prints
+`rm -rf` commands for the user to run). Each successful archive is logged
 to `archive.log` in the destination folder.
 
 Notes:
@@ -54,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("output_folder", nargs="?", help="Destination folder for archives (overrides env)")
     p.add_argument("--months", type=int, default=6, help="Age threshold in months (default: 6)")
     p.add_argument("--dry-run", action="store_true", help="Show actions without executing them")
+    p.add_argument("--verbose", "-v", action="store_true", help="Print the find | tar commands the script runs")
     p.add_argument("--use-lock", action="store_true", help="Use advisory lock when appending to log")
     p.add_argument("--log-rotate-size", type=int, default=0, help="Rotate log if larger than bytes (0=disabled)")
     p.add_argument("--keep", type=int, default=5, help="Number of rotated logs to keep")
@@ -106,11 +108,26 @@ def find_old_subdirs(input_folder: str, months: int) -> List[Tuple[str, float]]:
     return sorted(results, key=lambda x: x[1])
 
 
-def archive_folder(folder: str, dest_folder: str, dry_run: bool = False) -> Tuple[str, int]:
+def archive_folder(
+    folder: str,
+    dest_folder: str,
+    dry_run: bool = False,
+    verbose: bool = False,
+    source_dir: str | None = None,
+) -> Tuple[str, int]:
     trim_path = folder.rstrip("/\\")
     base = os.path.basename(trim_path)
     if not base:
         base = "archive"
+
+    # Prefer to run from the overall source directory that contains project
+    # subfolders (i.e., the script input folder). Fall back to the folder's
+    # parent if the computed relative path escapes the source dir.
+    source_root = source_dir or (os.path.dirname(trim_path) or os.curdir)
+    rel_project = os.path.relpath(trim_path, start=source_root)
+    if rel_project == os.pardir or rel_project.startswith(os.pardir + os.sep):
+        source_root = os.path.dirname(trim_path) or os.curdir
+        rel_project = base
 
     os.makedirs(dest_folder, exist_ok=True)
 
@@ -118,9 +135,13 @@ def archive_folder(folder: str, dest_folder: str, dry_run: bool = False) -> Tupl
     fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
     os.close(fd)
 
+    # Run from the source root so file list paths match what tar expects,
+    # and keep the top-level project folder name inside the archive.
     find_cmd = (
-        "find "
-        + shlex.quote(trim_path)
+        "cd "
+        + shlex.quote(source_root)
+        + " && find "
+        + shlex.quote(rel_project)
         + " -type f -iregex '"
         + EXT_REGEX
         + "' -size -10M -print0 | tar -czf "
@@ -131,6 +152,9 @@ def archive_folder(folder: str, dest_folder: str, dry_run: bool = False) -> Tupl
     if dry_run:
         print(f"DRY RUN: would run: {find_cmd}")
         return (tmp_path, 0)
+
+    if verbose:
+        print(f"VERBOSE: running: {find_cmd}")
 
     try:
         # Run via bash to preserve regex quoting behaviour
@@ -262,7 +286,7 @@ def main() -> int:
         print(f" - {path}  ({human_readable(size)})")
 
     print(f"\nTotal size to archive: {human_readable(total_size)}")
-    if not confirm("Proceed with archiving and deletion? [y/N]"):
+    if not confirm("Proceed with archiving? (Will print rm -rf commands for manual deletion) [y/N]"):
         print("Aborted by user.")
         return 0
 
@@ -271,7 +295,13 @@ def main() -> int:
     for path, orig_size in folders:
         print(f"Archiving: {path} ...")
         try:
-            archive_path, arc_size = archive_folder(path, output_folder, dry_run=args.dry_run)
+            archive_path, arc_size = archive_folder(
+                path,
+                output_folder,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+                source_dir=input_folder,
+            )
         except Exception as e:
             print(f"Failed to archive {path}: {e}")
             continue
